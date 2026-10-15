@@ -1,0 +1,8 @@
+# nothing from this repo's own folder is copied into the image (the upstream
+# source is cloned in the Dockerfile) - keep builds small anyway
+.git
+.github
+*.md
+Dockerfile
+docker-entrypoint.sh
+tools/
