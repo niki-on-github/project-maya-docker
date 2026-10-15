@@ -1,8 +1,6 @@
-# nothing from this repo's own folder is copied into the image (the upstream
-# source is cloned in the Dockerfile) - keep builds small anyway
+# Keep the build context small.  tools/ and docker-entrypoint.sh must stay IN
+# (the Dockerfile COPYs them); only this repo's own metadata is excluded.
 .git
 .github
 *.md
 Dockerfile
-docker-entrypoint.sh
-tools/
