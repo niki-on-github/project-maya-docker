@@ -35,6 +35,15 @@ RUN git clone --branch "$MAYA_REF" --depth 1 \
 
 WORKDIR /opt/project-maya
 
+# Honor HF_ENDPOINT at runtime (a HuggingFace mirror, e.g. an olah cache):
+# upstream hardcodes https://huggingface.co in maya.py's one download-URL
+# constant (HF / hf_url) - model, vision encoder and drafter all go through it.
+# The grep must succeed or the image build fails (upstream refactored the line).
+RUN sed -i \
+      's|^HF = "https://huggingface.co/{repo}/resolve/{revision}/{path}"$|HF = os.environ.get("HF_ENDPOINT", "https://huggingface.co") + "/{repo}/resolve/{revision}/{path}"|' \
+      maya.py \
+    && grep -q 'HF_ENDPOINT' maya.py
+
 # python3-pip is absent on Ubuntu 24.04, but ensurepip (in the venv) works
 RUN python3 -m venv .venv \
     && .venv/bin/pip install --upgrade pip \
