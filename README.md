@@ -105,6 +105,7 @@ container (mlock of the ~tens of GB expert pool is required for the RAM tier).
 | `MAYA_MODEL` | `Maya-M-Derisked` | quant for the first download: `Maya-S-v2-IQ2_XXS`, `Maya-S24`, `Maya-M`, `Maya-M-Derisked`, `Maya-L` — set empty for the setup's own recommendation |
 | `MAYA_DRAFT` | `dflash2` on `sm80`, `mtp` on `sm61` | how the model drafts: `dflash2` (a DFlash2 drafter, **sm_80+ only**) or `mtp` (the model's own block) |
 | `MAYA_NO_SPEED_CALIBRATION` | unset (calibration runs) | with `dflash2`: skip the speed calibration that measures DFlash2 against the MTP block (~5–20 min, loads the model twice) |
+| `MAYA_CA_BUNDLE` | unset | path to a PEM bundle of extra CA certificates to trust (internal mirror); also exported as `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` |
 | `MAYA_HOST` | `0.0.0.0` | listen address (you are in Docker) |
 | `MAYA_PORT` | `8080` | API/dashboard port |
 | `MAYA_API_KEY` | unset | require this key (recommended with `0.0.0.0`) |
@@ -114,6 +115,12 @@ Any extra arguments are passed to `./maya.sh`, e.g.:
 ```sh
 docker run ... images/... --gpu 0 --context 65536 --parallel 4
 ```
+
+If the model files come from an **internal mirror** (a private `HF_ENDPOINT`),
+trust its CA: mount the certificate(s) read-only into
+`/usr/local/share/ca-certificates/` (they are imported at start), or point
+`MAYA_CA_BUNDLE` at a PEM bundle. Without it the download stops with
+`curl: (60) SSL certificate problem: unable to get local issuer certificate`.
 
 ### DFlash2 (optional drafting)
 

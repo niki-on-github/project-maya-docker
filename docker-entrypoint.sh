@@ -17,6 +17,9 @@
 #   MAYA_NO_SPEED_CALIBRATION
 #                  set (any value) to keep DFlash2 without measuring it against
 #                  the MTP block (that calibration loads the model twice)
+#   MAYA_CA_BUNDLE a PEM bundle of extra CA certificates to trust (for an internal
+#                  Hugging Face mirror, say); certificates mounted into
+#                  /usr/local/share/ca-certificates/*.crt are imported as well
 #   MAYA_HOST      where the API listens        (default 0.0.0.0 - you are in Docker)
 #   MAYA_PORT      the API's port               (default 8080)
 #   MAYA_API_KEY   require this key (recommended when listening on 0.0.0.0)
@@ -27,6 +30,20 @@ CONFDIR=/data/maya/configs
 cd "$ROOT" || exit 1
 
 mkdir -p "$CONFDIR" /models
+
+# Trust a private CA (an internal Hugging Face mirror, say).  Certificates mounted
+# into /usr/local/share/ca-certificates/*.crt are imported into the system store,
+# and MAYA_CA_BUNDLE points curl, OpenSSL and Python at a PEM bundle directly -
+# without this, a mirror whose certificate is not publicly trusted fails with
+# "curl: (60) SSL certificate problem: unable to get local issuer certificate".
+if ls /usr/local/share/ca-certificates/*.crt >/dev/null 2>&1; then
+    update-ca-certificates >/dev/null 2>&1 || echo "warning: update-ca-certificates failed" >&2
+fi
+if [ -n "${MAYA_CA_BUNDLE:-}" ]; then
+    export CURL_CA_BUNDLE="$MAYA_CA_BUNDLE" \
+           SSL_CERT_FILE="$MAYA_CA_BUNDLE" \
+           REQUESTS_CA_BUNDLE="$MAYA_CA_BUNDLE"
+fi
 
 # Maya writes its configs into its own folder (which is part of the image):
 # link the ones on the /data volume in, so reads AND writes go to the volume.
