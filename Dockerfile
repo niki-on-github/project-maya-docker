@@ -2,16 +2,18 @@
 
 # Project Maya (https://github.com/mw00/project-maya) in a container.
 # The engine compiles once for ONE CUDA architecture (CMP 170HX = GA100 = sm_80
-# by default; override CUDA_ARCHITECTURES for a different card).  The model
+# by default; override CUDA_ARCHITECTURES for a different card - a Tesla P40 is
+# Pascal sm_61, built differently by tools/docker_build.py).  The model
 # (96-156 GB) and Maya's configs live outside the image in /models and /data
 # (see docker-entrypoint.sh).
 #
 # Build with a specific upstream tag:
-#   docker build --build-arg MAYA_REF=v1.1.9 -t maya .
+#   docker build --build-arg MAYA_REF=v1.1.15 -t maya .         # CMP 170HX, sm_80
+#   docker build --build-arg CUDA_ARCHITECTURES=61 -t maya-p40 . # Tesla P40, sm_61
 ARG CUDA_BASE=12.8.1-devel-ubuntu24.04
 FROM nvidia/cuda:${CUDA_BASE}
 
-ARG MAYA_REF=v1.1.9
+ARG MAYA_REF=v1.1.15
 ARG CUDA_ARCHITECTURES=80
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -57,9 +59,13 @@ RUN python3 -m venv .venv \
 COPY tools/docker_build.py tools/docker_build.py
 RUN .venv/bin/python tools/docker_build.py
 
-# Persistent home ($HOME) keeps the calibration state in /data
+# Persistent home ($HOME) keeps the calibration state in /data.
+# MAYA_MODEL is the quant the first start downloads; override it per container
+# with -e MAYA_MODEL=... (e.g. Maya-S24 on a 24 GB card), or -e MAYA_MODEL= to
+# fall back to the setup's own recommendation.
 ENV HOME=/data/maya/home \
-    PATH=/opt/project-maya/.venv/bin:$PATH
+    PATH=/opt/project-maya/.venv/bin:$PATH \
+    MAYA_MODEL=Maya-M-Derisked
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint
 RUN chmod +x /usr/local/bin/docker-entrypoint \

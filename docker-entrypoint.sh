@@ -8,8 +8,9 @@
 #
 # Environment:
 #   MAYA_MODEL     which quant to download on first start: Maya-S-v2-IQ2_XXS,
-#                  Maya-S24, Maya-M (default: the setup's recommendation),
-#                  Maya-M-Derisked, Maya-L
+#                  Maya-S24, Maya-M, Maya-M-Derisked, Maya-L (the image sets
+#                  Maya-M-Derisked; override with -e MAYA_MODEL=..., or an empty
+#                  value for the setup's own recommendation)
 #   MAYA_HOST      where the API listens        (default 0.0.0.0 - you are in Docker)
 #   MAYA_PORT      the API's port               (default 8080)
 #   MAYA_API_KEY   require this key (recommended when listening on 0.0.0.0)

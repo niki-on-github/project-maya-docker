@@ -1,10 +1,10 @@
 name: Build and publish Docker image
 
-# Keeps the image in step with upstream's newest tag: a daily cron resolves
-# mw00/project-maya's newest tag and pushes ghcr.io/<owner>/<repo> with that
-# tag's source, tagged <upstream-tag> and latest.  A tag is rebuilt only when
-# the corresponding image is not on GHCR yet (schedule); manual dispatches and
-# pushes to main always build.
+# Keeps the images in step with upstream's newest tag: a daily cron resolves
+# mw00/project-maya's newest tag and pushes ghcr.io/<owner>/<repo> for BOTH
+# architectures - CMP 170HX (sm80) and Pascal / Tesla P40 (sm61) - each tagged
+# <arch>-<upstream-tag> (e.g. sm80-v1.1.15, sm61-v1.1.15) and <arch>-latest.
+# Both are built on every run.
 on:
   schedule:
     - cron: "20 6 * * *"   # daily 06:20 UTC
@@ -12,10 +12,6 @@ on:
     inputs:
       maya_ref:
         description: "Upstream ref/tag to build (default: the newest tag)"
-        required: false
-        default: ""
-      cuda_arch:
-        description: "CUDA_ARCHITECTURES (empty = 80, the CMP 170HX default)"
         required: false
         default: ""
   push:
@@ -32,6 +28,14 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda_arch: 80
+            suffix: sm80   # CMP 170HX (GA100), A100
+          - cuda_arch: 61
+            suffix: sm61   # Tesla P40 / P100, GTX 10 (Pascal, experimental)
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -50,24 +54,6 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Upstream tag: $TAG"
 
-      - name: Is this image tag published already?
-        id: published
-        env:
-          TAG: ${{ steps.latest.outputs.tag }}
-          REPO: ${{ github.repository }}
-        run: |
-          TOKEN=$(curl -sf "https://ghcr.io/token?scope=repository:$REPO:pull" | jq -r .token)
-          PUBLISHED=$(curl -sf -H "Authorization: Bearer $TOKEN" \
-            "https://ghcr.io/v2/${REPO}/tags/list" | jq -r '.tags // [] | join("\n")')
-          echo "Tags on GHCR now:"
-          echo "$PUBLISHED"
-          NEEDS_BUILD=yes
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "$PUBLISHED" | grep -qx "$TAG" && NEEDS_BUILD=no || NEEDS_BUILD=yes
-          fi
-          echo "needs_build=$NEEDS_BUILD" >> "$GITHUB_OUTPUT"
-          echo "Newest upstream tag: $TAG - needs build: $NEEDS_BUILD"
-
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -79,16 +65,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        if: steps.published.outputs.needs_build == 'yes'
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           build-args: |
             MAYA_REF=${{ steps.latest.outputs.tag }}
-            CUDA_ARCHITECTURES=${{ inputs.cuda_arch || '80' }}
+            CUDA_ARCHITECTURES=${{ matrix.cuda_arch }}
           tags: |
-            ghcr.io/${{ github.repository }}:${{ steps.latest.outputs.tag }}
-            ghcr.io/${{ github.repository }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ghcr.io/${{ github.repository }}:${{ matrix.suffix }}-${{ steps.latest.outputs.tag }}
+            ghcr.io/${{ github.repository }}:${{ matrix.suffix }}-latest
+          cache-from: type=gha,scope=${{ matrix.suffix }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.suffix }}
