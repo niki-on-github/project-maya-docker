@@ -12,10 +12,10 @@ newest tag and builds and pushes **both** architectures to GHCR as
 `sm61-v1.1.15`) and `:<arch>-latest`.  Manual runs and pushes to `main` build
 too; every run rebuilds both architectures.
 
-| Image | `<arch>` | GPU | `CUDA_ARCHITECTURES` |
-|---|---|---|---|
-| CMP 170HX / A100 | `sm80` | compute capability 8.0 | `80` |
-| Tesla P40 / P100 | `sm61` | Pascal, compute capability 6.1 | `61` |
+| Image | `<arch>` | GPU | `CUDA_ARCHITECTURES` | Default drafting |
+|---|---|---|---|---|
+| CMP 170HX / A100 | `sm80` | compute capability 8.0 | `80` | DFlash2 |
+| Tesla P40 / P100 | `sm61` | Pascal, compute capability 6.1 | `61` | MTP block |
 
 Build input (`workflow_dispatch`):
 
@@ -90,7 +90,8 @@ The entrypoint runs Maya's non-interactive setup with
 `-e MAYA_MODEL=...`) is downloaded **resumably** into `/models` (96.5–156 GB +
 1.1 GB vision encoder), the pack is built next to it, and the config is kept on
 `/data` — a recreated (or updated) container re-uses both.  A stopped download
-continues on the next start.
+continues on the next start.  On the `sm80` image the DFlash2 drafter (0.7 GB) is
+fetched the same way (see [DFlash2](#dflash2-optional-drafting)).
 
 Note from upstream: while Maya runs, the engine pins almost all free RAM for
 its expert tier — other programs get little.  `--ipc host`,
@@ -102,6 +103,8 @@ container (mlock of the ~tens of GB expert pool is required for the RAM tier).
 | Variable | Default | Meaning |
 |---|---|---|
 | `MAYA_MODEL` | `Maya-M-Derisked` | quant for the first download: `Maya-S-v2-IQ2_XXS`, `Maya-S24`, `Maya-M`, `Maya-M-Derisked`, `Maya-L` — set empty for the setup's own recommendation |
+| `MAYA_DRAFT` | `dflash2` on `sm80`, `mtp` on `sm61` | how the model drafts: `dflash2` (a DFlash2 drafter, **sm_80+ only**) or `mtp` (the model's own block) |
+| `MAYA_NO_SPEED_CALIBRATION` | unset (calibration runs) | with `dflash2`: skip the speed calibration that measures DFlash2 against the MTP block (~5–20 min, loads the model twice) |
 | `MAYA_HOST` | `0.0.0.0` | listen address (you are in Docker) |
 | `MAYA_PORT` | `8080` | API/dashboard port |
 | `MAYA_API_KEY` | unset | require this key (recommended with `0.0.0.0`) |
@@ -111,6 +114,28 @@ Any extra arguments are passed to `./maya.sh`, e.g.:
 ```sh
 docker run ... images/... --gpu 0 --context 65536 --parallel 4
 ```
+
+### DFlash2 (optional drafting)
+
+The optional **DFlash2 drafter** — a small block drafter (0.7 GB) that speeds up
+answers on **sm_80 and newer** (RTX 30 / A100) — is on by default for the `sm80`
+image: on first start it is downloaded into `/models/GLM-5.3-Flash-DFlash2/`
+(persistent, resumes if stopped) and the setup's **speed calibration** measures
+it against the MTP block (~5–20 min, loads the model twice) and keeps DFlash2
+only if it is actually faster on your machine. Turn it off with
+`-e MAYA_DRAFT=mtp`; skip the measurement with `-e MAYA_NO_SPEED_CALIBRATION=1`
+— useful when the model streams most experts from RAM/SSD and DFlash2 is not
+worth the calibration.
+
+On the `sm61` (P40/P100, Pascal) image DFlash2 cannot run (it needs tensor
+cores); that image drafts with the MTP block, and asking for `dflash2` there is
+ignored with a note.
+
+The drafter is **not baked into the image** (it is CC BY-NC-ND 4.0,
+non-commercial use only) — it is downloaded at first start, only when drafting
+with DFlash2. Like `MAYA_MODEL`, this is a first-start choice: an existing
+`/data` config keeps its drafting mode; change it with a fresh `/data` or a
+`--setup` run.
 
 ### Rebuild for a different NVIDIA card
 
@@ -142,8 +167,8 @@ a P40 at all.
 - `tools/docker_build.py` — compile-only helper (no GPU needed at build time),
   reusing upstream's maya.py machinery; handles Pascal's explicit-arch build and
   enforces the minimum Maya version (v1.1.14)
-- `docker-entrypoint.sh` — first-start setup + model download, config kept on
-  `/data`
+- `docker-entrypoint.sh` — first-start setup + model download (and the DFlash2
+  drafter where it applies), config kept on `/data`
 - `.github/workflows/docker-ghcr.yml` — daily tag-resolve + publish of both
   architectures
 
@@ -151,4 +176,6 @@ a P40 at all.
 
 All engine/server/dashboard work is upstream Project Maya (@mw00,
 @needmorevram and contributors), MIT.  This repo only packages it.  The
-optional DFlash2 drafter is not included (CC BY-NC-ND, off by default).
+optional DFlash2 drafter is **not baked into the image** (CC BY-NC-ND 4.0,
+non-commercial) — it is downloaded at first start, only when drafting with
+DFlash2 (the default on the `sm80` image, off on `sm61`).

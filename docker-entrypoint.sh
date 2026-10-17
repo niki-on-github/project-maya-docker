@@ -11,6 +11,12 @@
 #                  Maya-S24, Maya-M, Maya-M-Derisked, Maya-L (the image sets
 #                  Maya-M-Derisked; override with -e MAYA_MODEL=..., or an empty
 #                  value for the setup's own recommendation)
+#   MAYA_DRAFT     how the model drafts on first start: dflash2 = a DFlash2
+#                  drafter (needs sm_80+ - RTX 30 / A100), mtp = the model's own
+#                  MTP block.  Default: dflash2 on an sm_80+ image, mtp otherwise
+#   MAYA_NO_SPEED_CALIBRATION
+#                  set (any value) to keep DFlash2 without measuring it against
+#                  the MTP block (that calibration loads the model twice)
 #   MAYA_HOST      where the API listens        (default 0.0.0.0 - you are in Docker)
 #   MAYA_PORT      the API's port               (default 8080)
 #   MAYA_API_KEY   require this key (recommended when listening on 0.0.0.0)
@@ -33,7 +39,23 @@ have_config() { ls "$CONFDIR"/maya-*.json >/dev/null 2>&1; }
 
 if ! have_config; then
     echo "== Project Maya first start: setup, model download (resumes when stopped) =="
+    # How the model drafts tokens ahead.  DFlash2 needs compute capability 8.0+
+    # (RTX 30 / A100) and is the default there; elsewhere the model's own MTP
+    # block.  CUDA_ARCHITECTURES is the arch this image was built for (Dockerfile);
+    # the lowest of the list decides, as upstream's own check does.
+    arch=$(printf '%s\n' "${CUDA_ARCHITECTURES:-}" | tr ',;' '\n\n' \
+           | grep -oE '^[0-9]+' | sort -n | head -1)
+    draft=${MAYA_DRAFT:-}
+    if [ -z "$draft" ]; then
+        if [ -n "$arch" ] && [ "$arch" -ge 80 ]; then draft=dflash2; else draft=mtp; fi
+    fi
+    if [ "$draft" = dflash2 ] && { [ -z "$arch" ] || [ "$arch" -lt 80 ]; }; then
+        echo "note: DFlash2 needs compute capability 8.0+ (RTX 30 / A100); this image is sm_${arch:-unknown} - using the MTP block" >&2
+        draft=mtp
+    fi
     args="--setup --yes --plain --no-start --download-model --models-dir /models"
+    args="$args --draft $draft"
+    [ -n "$MAYA_NO_SPEED_CALIBRATION" ] && args="$args --no-speed-calibration"
     args="$args --host ${MAYA_HOST:-0.0.0.0}"
     [ -n "$MAYA_PORT" ] && args="$args --port $MAYA_PORT"
     [ -n "$MAYA_MODEL" ] && args="$args --model $MAYA_MODEL"

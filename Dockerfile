@@ -19,6 +19,8 @@ ARG CUDA_ARCHITECTURES=80
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES}
+# (CUDA_ARCHITECTURES stays in the image: docker-entrypoint.sh reads it at start
+# to pick the drafting default - DFlash2 on sm_80+, the MTP block otherwise.)
 
 # git is only needed here (the upstream source is cloned in the image build); a
 # CUDA *devel* image is required for nvcc at build time.
