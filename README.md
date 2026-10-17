@@ -24,8 +24,10 @@ Build input (`workflow_dispatch`):
 | `maya_ref` | newest upstream tag | upstream ref/tag to build |
 
 On a GitHub-hosted runner each build drops from ~37 min for all seven upstream
-architectures (cold, no cache) to roughly **10–15 min** for the single arch;
-with the GHA layer cache warm it is under ~10 min.  The P40 (`sm61`) image is
+architectures (cold, no cache) to roughly **10–15 min** for the single-arch
+engine, plus another ~10–20 min the first time for the vision encoder (both are
+built in the image, so a container's first start only downloads).  With the GHA
+layer cache warm it is faster.  The P40 (`sm61`) image is
 built differently — see [Rebuild for a different NVIDIA card](#rebuild-for-a-different-nvidia-card).
 
 ## Run
@@ -171,9 +173,10 @@ a P40 at all.
 
 - `Dockerfile` — clones upstream at `MAYA_REF` (default latest release handled
   by CI), compiles for `CUDA_ARCHITECTURES`, sets the default `MAYA_MODEL`
-- `tools/docker_build.py` — compile-only helper (no GPU needed at build time),
-  reusing upstream's maya.py machinery; handles Pascal's explicit-arch build and
-  enforces the minimum Maya version (v1.1.14)
+- `tools/docker_build.py` — compile-only helper (no GPU needed at build time)
+  that builds the engine and the vision encoder, reusing upstream's maya.py
+  machinery; handles Pascal's explicit-arch build and enforces the minimum Maya
+  version (v1.1.14)
 - `docker-entrypoint.sh` — first-start setup + model download (and the DFlash2
   drafter where it applies), config kept on `/data`
 - `.github/workflows/docker-ghcr.yml` — daily tag-resolve + publish of both

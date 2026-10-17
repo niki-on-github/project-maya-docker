@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Compile Project Maya's engine inside the Docker build - no GPU needed.
+"""Compile Project Maya's engine and vision encoder inside the Docker build - no GPU needed.
 
-Same flow as upstream's tools step + build step (maya.py), driven by the
-CUDA_ARCHITECTURES build-arg: llama.cpp's pinned source, then CMake + Ninja for
+Same flow as upstream's tools step + build step + vision step (maya.py), driven by
+the CUDA_ARCHITECTURES build-arg: llama.cpp's pinned source, then CMake + Ninja for
 the listed sm_ versions.  The engine needs no GPU to COMPILE - only to run.
 
 Pascal (Tesla P40, sm_61) is built differently from the default CMP 170HX
@@ -89,6 +89,16 @@ def main():
                               host_compiler=None, llama=llama, src=src)
     if result is None:
         sys.exit("engine compilation failed")
+
+    # The image (vision) encoder - llama.cpp's mtmd with GLM-5.3-Flash's vision tower patched in
+    # - is upstream's setup step 7; nothing else pre-builds it, so a container's first start
+    # would compile it (10-20 minutes).  Build it here too and let compile_vision write
+    # build-vision/MAYA-BUILD.json with the same source hash vision_step() checks at start, so
+    # the start only downloads the vision files.  The patch it applies to third_party/llama.cpp
+    # is not part of ENGINE_SOURCES, so the engine's own stamp above stays valid.
+    vision_src = S.source_hash(("tools/vision",))
+    if not M.compile_vision({"archs": archs, "nvcc": nvcc}, result, llama, vision_src):
+        sys.exit("vision encoder compilation failed")
 
 
 if __name__ == "__main__":
