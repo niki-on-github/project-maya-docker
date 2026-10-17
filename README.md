@@ -111,21 +111,29 @@ container (mlock of the ~tens of GB expert pool is required for the RAM tier).
 | `MAYA_HOST` | `0.0.0.0` | listen address (you are in Docker) |
 | `MAYA_PORT` | `8080` | API/dashboard port |
 | `MAYA_API_KEY` | unset | require this key (recommended with `0.0.0.0`).  Written into a new config at first start **and** exported as `STRATA_API_KEY` at every start, so it also protects an existing `/data` volume whose config has no `api_key` |
-| `MAYA_PREFILL` | unset (upstream's `auto`) | the engine's prompt chunk written into the config's `args`: `auto` or a number, e.g. `32768`. On a multi-GPU split with ≥ 96 GB RAM upstream measures +21-35% prompt reading; below ~64 GB a chunk above 8192 is slower |
+| `MAYA_PREFILL` | unset (upstream's `auto`) | the engine's prompt chunk, exported as the engine's own `STRATA_GLM_PREFILL_CHUNK`: `auto` or a number, e.g. `32768`.  The engine reads that before the config's `--prefill`, so it wins on an existing `/data` volume.  On a multi-GPU split with ≥ 96 GB RAM upstream measures +21-35% prompt reading; below ~64 GB a chunk above 8192 is slower |
+| `MAYA_CONTEXT` | unset (the setup's choice, `32768`) | the engine's context length written into the config's `args` (`--max-context`): a number, e.g. `1048576`.  The setup's own `--context` only counts while setting up, so on an existing `/data` volume this is how to change the context |
 
 Any extra arguments are passed to `./maya.sh`, e.g.:
 
 ```sh
-docker run ... images/... --gpu 0 --context 65536 --parallel 4
+docker run ... images/... --gpu 0 --parallel 4
 ```
 
-`MAYA_PREFILL` works differently: `--prefill` is an *engine* flag that lives in
-the installed config's `args`, not a `maya.py` option, so it cannot be given on
-the `docker run` line — set it with `-e MAYA_PREFILL=32768` and the entrypoint
-writes it into the config before Maya starts (also on an existing `/data`
-volume).  On a first start the setup's log may still print upstream's own
-"`--prefill 32768`" tip: it is emitted while the config still says `auto`, and
-the value is applied right after.
+`MAYA_PREFILL` and `MAYA_CONTEXT` are not given on the `docker run` line.
+`MAYA_PREFILL` is exported as the engine's own `STRATA_GLM_PREFILL_CHUNK`, which
+the engine reads before the config's `--prefill` (the engine stamps
+`STRATA_GLM_PREFILL` itself from the config, so only the `_CHUNK` name works) —
+set it with `-e MAYA_PREFILL=32768` and it also applies to an existing `/data`
+volume.  `MAYA_CONTEXT` is the context length, i.e. `--max-context` in the
+config's `args`, which has no environment equivalent: the entrypoint writes it
+into the config at every start.  The setup's own `--context` only counts while
+setting up — so on an **existing** `/data` volume `--context 1048576` on the
+`docker run` line does nothing, and `-e MAYA_CONTEXT=1048576` is what changes it
+(it also wins over a `--context` given on a first start).  On a first start the
+setup's log may still print upstream's own "`--prefill 32768`" tip: it is
+emitted while the config still says `auto`, and the value applies from the first
+engine start.
 
 If the model files come from an **internal mirror** (a private `HF_ENDPOINT`),
 trust its CA: mount the certificate(s) read-only into

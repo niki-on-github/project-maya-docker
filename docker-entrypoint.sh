@@ -25,9 +25,13 @@
 #   MAYA_API_KEY   require this key: written into a new config at first start,
 #                  and exported as STRATA_API_KEY at every start (so an existing
 #                  config written without one is protected too)
-#   MAYA_PREFILL   the engine's prompt chunk written into the config's args: auto
-#                  or a number, e.g. 32768 (unset: leave upstream's "auto")
-# Any command-line arguments are passed to ./maya.sh (e.g. --gpu 0 --context 65536).
+#   MAYA_PREFILL   the engine's prompt chunk, exported as STRATA_GLM_PREFILL_CHUNK:
+#                  auto or a number, e.g. 32768 (unset: leave upstream's "auto")
+#   MAYA_CONTEXT   the engine's context length written into the config's args: a
+#                  number, e.g. 1048576 (unset: leave the setup's choice).  The
+#                  setup option behind it, --context, only counts while setting up,
+#                  so on an existing /data volume this is how to change it
+# Any command-line arguments are passed to ./maya.sh (e.g. --gpu 0 --parallel 4).
 
 ROOT=/opt/project-maya
 CONFDIR=/data/maya/configs
@@ -58,21 +62,15 @@ done
 
 have_config() { ls "$CONFDIR"/maya-*.json >/dev/null 2>&1; }
 
-# MAYA_PREFILL: the engine's prompt chunk, in the config's args.  Upstream writes
-# "--prefill auto"; on a multi-GPU split with plenty of RAM an explicit 32768
-# reads prompts 21-35% faster (a chunk above 8192 is slower below ~64 GB).
-# Unset: leave the config as upstream wrote it.  --prefill is an engine flag, not
-# a maya.py option, so it cannot be passed on the command line.
-apply_prefill() {
-    [ -n "${MAYA_PREFILL:-}" ] || return 0
-    case "$MAYA_PREFILL" in
-        auto) ;;                      # what upstream writes anyway
-        *[!0-9]*) echo "warning: ignoring MAYA_PREFILL=$MAYA_PREFILL (use 'auto' or a number)" >&2
-                  return 0 ;;
-    esac
-    MAYA_PREFILL="$MAYA_PREFILL" CONFDIR="$CONFDIR" python3 - <<'PY'
+# An engine flag that maya.py only reads while setting up (so on an existing /data
+# volume the config's value would win): keep the config's args in sync with the
+# environment on every start.  $1 = the flag, $2 = its value, $3 = the log label.
+# A flag that is not there yet is appended; an unset value leaves the config alone.
+apply_engine_arg() {
+    [ -n "${2:-}" ] || return 0
+    MAYA_ARG_FLAG="$1" MAYA_ARG_VALUE="$2" MAYA_ARG_LABEL="$3" CONFDIR="$CONFDIR" python3 - <<'PY'
 import glob, json, os, sys
-value = os.environ["MAYA_PREFILL"]
+flag, value, label = (os.environ[k] for k in ("MAYA_ARG_FLAG", "MAYA_ARG_VALUE", "MAYA_ARG_LABEL"))
 for p in sorted(glob.glob(os.path.join(os.environ["CONFDIR"], "maya-*.json"))):
     try:
         cfg = json.load(open(p))
@@ -80,14 +78,18 @@ for p in sorted(glob.glob(os.path.join(os.environ["CONFDIR"], "maya-*.json"))):
         print(f"warning: {p}: {e}", file=sys.stderr)
         continue
     args = cfg.get("args") or []
-    if "--prefill" in args[:-1]:
-        args[args.index("--prefill") + 1] = value
+    if flag in args[:-1]:
+        if args[args.index(flag) + 1] == value:
+            continue                        # already what the environment says
+        args[args.index(flag) + 1] = value
     else:
-        args += ["--prefill", value]
+        args += [flag, value]
     cfg["args"] = args
-    with open(p, "w") as f:
+    tmp = f"{p}.tmp"                        # write beside it and rename: a kill in the
+    with open(tmp, "w") as f:                # middle must not truncate the config
         json.dump(cfg, f, indent=1)          # indent=1: upstream's own style
-    print(f"MAYA_PREFILL: {p}: --prefill {value}")
+    os.replace(tmp, p)
+    print(f"{label}: {p}: {flag} {value}")
 PY
 }
 
@@ -129,8 +131,29 @@ if ! have_config; then
 fi
 
 # Both paths have converged here (a first start moved its configs onto /data), so
-# one call covers a new install and an existing /data volume alike.
-apply_prefill
+# what follows covers a new install and an existing /data volume alike.
+# MAYA_CONTEXT: the context length, i.e. --max-context in the config's args.  The
+# setup's own menu stops at 128K, and its --context only counts while setting up -
+# written after it, a value here wins either way.
+case "${MAYA_CONTEXT:-}" in
+    "") ;;                            # unset: leave the config as it is
+    *[!0-9]*) echo "warning: ignoring MAYA_CONTEXT=$MAYA_CONTEXT (use a number, e.g. 1048576)" >&2
+              MAYA_CONTEXT= ;;
+esac
+apply_engine_arg --max-context "${MAYA_CONTEXT:-}" MAYA_CONTEXT
+
+# MAYA_PREFILL: the engine's prompt chunk, exported as the engine's own
+# STRATA_GLM_PREFILL_CHUNK - the one the engine reads before the config's
+# "--prefill", so it wins on an existing /data volume without touching it.  (The
+# engine stamps STRATA_GLM_PREFILL itself from the config's --prefill, so only the
+# _CHUNK name works.)  Upstream writes "--prefill auto"; on a multi-GPU split with
+# plenty of RAM an explicit 32768 reads prompts 21-35% faster (a chunk above 8192
+# is slower below ~64 GB).
+case "${MAYA_PREFILL:-}" in
+    "" | auto) ;;                     # auto is what upstream writes anyway
+    *[!0-9]*) echo "warning: ignoring MAYA_PREFILL=$MAYA_PREFILL (use 'auto' or a number)" >&2 ;;
+    *) export STRATA_GLM_PREFILL_CHUNK="$MAYA_PREFILL" ;;
+esac
 
 # The server gates /v1 on STRATA_API_KEY (serve/server.py: --api-key defaults to
 # it), and maya.py passes the whole environment through.  Exporting MAYA_API_KEY
