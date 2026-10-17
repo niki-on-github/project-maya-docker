@@ -22,7 +22,11 @@
 #                  /usr/local/share/ca-certificates/*.crt are imported as well
 #   MAYA_HOST      where the API listens        (default 0.0.0.0 - you are in Docker)
 #   MAYA_PORT      the API's port               (default 8080)
-#   MAYA_API_KEY   require this key (recommended when listening on 0.0.0.0)
+#   MAYA_API_KEY   require this key: written into a new config at first start,
+#                  and exported as STRATA_API_KEY at every start (so an existing
+#                  config written without one is protected too)
+#   MAYA_PREFILL   the engine's prompt chunk written into the config's args: auto
+#                  or a number, e.g. 32768 (unset: leave upstream's "auto")
 # Any command-line arguments are passed to ./maya.sh (e.g. --gpu 0 --context 65536).
 
 ROOT=/opt/project-maya
@@ -53,6 +57,39 @@ for f in "$CONFDIR"/maya-*.json; do
 done
 
 have_config() { ls "$CONFDIR"/maya-*.json >/dev/null 2>&1; }
+
+# MAYA_PREFILL: the engine's prompt chunk, in the config's args.  Upstream writes
+# "--prefill auto"; on a multi-GPU split with plenty of RAM an explicit 32768
+# reads prompts 21-35% faster (a chunk above 8192 is slower below ~64 GB).
+# Unset: leave the config as upstream wrote it.  --prefill is an engine flag, not
+# a maya.py option, so it cannot be passed on the command line.
+apply_prefill() {
+    [ -n "${MAYA_PREFILL:-}" ] || return 0
+    case "$MAYA_PREFILL" in
+        auto) ;;                      # what upstream writes anyway
+        *[!0-9]*) echo "warning: ignoring MAYA_PREFILL=$MAYA_PREFILL (use 'auto' or a number)" >&2
+                  return 0 ;;
+    esac
+    MAYA_PREFILL="$MAYA_PREFILL" CONFDIR="$CONFDIR" python3 - <<'PY'
+import glob, json, os, sys
+value = os.environ["MAYA_PREFILL"]
+for p in sorted(glob.glob(os.path.join(os.environ["CONFDIR"], "maya-*.json"))):
+    try:
+        cfg = json.load(open(p))
+    except (OSError, ValueError) as e:      # never break the start over this
+        print(f"warning: {p}: {e}", file=sys.stderr)
+        continue
+    args = cfg.get("args") or []
+    if "--prefill" in args[:-1]:
+        args[args.index("--prefill") + 1] = value
+    else:
+        args += ["--prefill", value]
+    cfg["args"] = args
+    with open(p, "w") as f:
+        json.dump(cfg, f, indent=1)          # indent=1: upstream's own style
+    print(f"MAYA_PREFILL: {p}: --prefill {value}")
+PY
+}
 
 if ! have_config; then
     echo "== Project Maya first start: setup, model download (resumes when stopped) =="
@@ -90,5 +127,16 @@ if ! have_config; then
         ln -sf "$CONFDIR/$(basename "$f")" "$f"
     done
 fi
+
+# Both paths have converged here (a first start moved its configs onto /data), so
+# one call covers a new install and an existing /data volume alike.
+apply_prefill
+
+# The server gates /v1 on STRATA_API_KEY (serve/server.py: --api-key defaults to
+# it), and maya.py passes the whole environment through.  Exporting MAYA_API_KEY
+# as STRATA_API_KEY also protects an existing /data volume whose config was
+# written without an "api_key" (only a fresh setup writes one).  Unset: no
+# change; a STRATA_API_KEY given directly is left intact.
+export STRATA_API_KEY="${MAYA_API_KEY:-${STRATA_API_KEY:-}}"
 
 exec ./maya.sh "$@"

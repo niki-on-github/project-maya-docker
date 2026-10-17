@@ -110,13 +110,22 @@ container (mlock of the ~tens of GB expert pool is required for the RAM tier).
 | `MAYA_CA_BUNDLE` | unset | path to a PEM bundle of extra CA certificates to trust (internal mirror); also exported as `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` |
 | `MAYA_HOST` | `0.0.0.0` | listen address (you are in Docker) |
 | `MAYA_PORT` | `8080` | API/dashboard port |
-| `MAYA_API_KEY` | unset | require this key (recommended with `0.0.0.0`) |
+| `MAYA_API_KEY` | unset | require this key (recommended with `0.0.0.0`).  Written into a new config at first start **and** exported as `STRATA_API_KEY` at every start, so it also protects an existing `/data` volume whose config has no `api_key` |
+| `MAYA_PREFILL` | unset (upstream's `auto`) | the engine's prompt chunk written into the config's `args`: `auto` or a number, e.g. `32768`. On a multi-GPU split with ≥ 96 GB RAM upstream measures +21-35% prompt reading; below ~64 GB a chunk above 8192 is slower |
 
 Any extra arguments are passed to `./maya.sh`, e.g.:
 
 ```sh
 docker run ... images/... --gpu 0 --context 65536 --parallel 4
 ```
+
+`MAYA_PREFILL` works differently: `--prefill` is an *engine* flag that lives in
+the installed config's `args`, not a `maya.py` option, so it cannot be given on
+the `docker run` line — set it with `-e MAYA_PREFILL=32768` and the entrypoint
+writes it into the config before Maya starts (also on an existing `/data`
+volume).  On a first start the setup's log may still print upstream's own
+"`--prefill 32768`" tip: it is emitted while the config still says `auto`, and
+the value is applied right after.
 
 If the model files come from an **internal mirror** (a private `HF_ENDPOINT`),
 trust its CA: mount the certificate(s) read-only into
