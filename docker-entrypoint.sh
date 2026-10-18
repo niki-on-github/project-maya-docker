@@ -31,10 +31,18 @@
 #                  number, e.g. 1048576 (unset: leave the setup's choice).  The
 #                  setup option behind it, --context, only counts while setting up,
 #                  so on an existing /data volume this is how to change it
+#
+# Images (the vision encoder) come with the image, not with a variable: the sm80
+# image builds and runs it, the sm61 (Pascal) one is text only.  A first start on
+# an image without it passes upstream's --no-vision (no 1.1 GB download, no compile
+# attempt), and a config that still names an encoder this image does not have is
+# made text only at every start.
+#
 # Any command-line arguments are passed to ./maya.sh (e.g. --gpu 0 --parallel 4).
 
 ROOT=/opt/project-maya
 CONFDIR=/data/maya/configs
+VISION_EXE="$ROOT/build-vision/bin/strata-vision"   # the image encoder: in the sm80 image, not the sm61 (Pascal) one
 cd "$ROOT" || exit 1
 
 mkdir -p "$CONFDIR" /models
@@ -93,6 +101,35 @@ for p in sorted(glob.glob(os.path.join(os.environ["CONFDIR"], "maya-*.json"))):
 PY
 }
 
+# The image (vision) encoder ships with the image, not with the /data volume: the
+# sm80 image has it, the sm61 (Pascal) one does not.  A config written by an image
+# that had it can still name it, and the server would start that encoder process
+# and die when the binary is not there (serve/server.py: "the vision encoder did
+# not start" - and, before that, when a local encoder could not be measured).  Drop
+# such an entry at every start; the encoder's files stay on /models - they are only
+# unused.  An image WITH the encoder is untouched.
+drop_dead_vision() {
+    CONFDIR="$CONFDIR" python3 - <<'PY'
+import glob, json, os, sys
+for p in sorted(glob.glob(os.path.join(os.environ["CONFDIR"], "maya-*.json"))):
+    try:
+        cfg = json.load(open(p))
+    except (OSError, ValueError) as e:
+        print(f"warning: {p}: {e}", file=sys.stderr)
+        continue
+    v = cfg.get("vision")
+    if not v or os.path.exists(v.get("exe") or ""):
+        continue
+    cfg.pop("vision")
+    tmp = f"{p}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(cfg, f, indent=1)
+    os.replace(tmp, p)
+    print(f"images: {os.path.basename(p)}: this image has no vision encoder "
+          f"({v.get('exe')}) - the model reads text only")
+PY
+}
+
 if ! have_config; then
     echo "== Project Maya first start: setup, model download (resumes when stopped) =="
     # How the model drafts tokens ahead.  DFlash2 needs compute capability 8.0+
@@ -112,6 +149,9 @@ if ! have_config; then
     args="--setup --yes --plain --no-start --download-model --models-dir /models"
     args="$args --draft $draft"
     [ -n "$MAYA_NO_SPEED_CALIBRATION" ] && args="$args --no-speed-calibration"
+    # No encoder in this image (the sm61/Pascal one): text only - upstream's setup
+    # then neither downloads the 1.1 GB files nor tries to compile a vision encoder.
+    [ -x "$VISION_EXE" ] || args="$args --no-vision"
     args="$args --host ${MAYA_HOST:-0.0.0.0}"
     [ -n "$MAYA_PORT" ] && args="$args --port $MAYA_PORT"
     [ -n "$MAYA_MODEL" ] && args="$args --model $MAYA_MODEL"
@@ -141,6 +181,10 @@ case "${MAYA_CONTEXT:-}" in
               MAYA_CONTEXT= ;;
 esac
 apply_engine_arg --max-context "${MAYA_CONTEXT:-}" MAYA_CONTEXT
+
+# A config that names a vision encoder this image does not ship (the sm61 one):
+# make it text only, so the server starts instead of dying on the missing binary.
+drop_dead_vision
 
 # MAYA_PREFILL: the engine's prompt chunk, exported as the engine's own
 # STRATA_GLM_PREFILL_CHUNK - the one the engine reads before the config's

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile Project Maya's engine and vision encoder inside the Docker build - no GPU needed.
+"""Compile Project Maya's engine (and, on sm_70+, the vision encoder) inside the Docker build - no GPU needed.
 
 Same flow as upstream's tools step + build step + vision step (maya.py), driven by
 the CUDA_ARCHITECTURES build-arg: llama.cpp's pinned source, then CMake + Ninja for
@@ -85,6 +85,20 @@ def main():
     # GitHub's free runners have limited RAM: nvcc takes 2-4 GB per parallel job
     M.mem_gb = lambda: (12.0, 12.0)
 
+    # Upstream's CUDA build leaves ggml at its default GGML_NATIVE=ON, so cmake bakes the BUILD machine's
+    # instruction set into ggml (-march=native).  The image is built on a GitHub runner (AVX-512) but runs
+    # on the card's host, which often is older (a Xeon E5, a desktop Ryzen): the engine then dies with
+    # SIGILL ("Illegal instruction", exit 132) the moment it reaches ggml code.  STRATA_PORTABLE=ON is
+    # upstream's own switch (its HIP path sets it too); GGML_NATIVE=OFF is its ggml half - an AVX2
+    # baseline, with ggml still picking AVX-512 at runtime on CPUs that have it.  compile_engine and
+    # compile_vision both configure through maya.cmake_steps, so one wrapper covers both.
+    _cmake_steps = M.cmake_steps
+
+    def portable_cmake_steps(conf, build, env, bat_name, vcvars=None):
+        return _cmake_steps([*conf, "-DSTRATA_PORTABLE=ON", "-DGGML_NATIVE=OFF"], build, env, bat_name, vcvars)
+
+    M.cmake_steps = portable_cmake_steps
+
     result = M.compile_engine(archs=archs, gpu_ids=[], nvcc=nvcc,
                               host_compiler=None, llama=llama, src=src)
     if result is None:
@@ -96,9 +110,15 @@ def main():
     # build-vision/MAYA-BUILD.json with the same source hash vision_step() checks at start, so
     # the start only downloads the vision files.  The patch it applies to third_party/llama.cpp
     # is not part of ENGINE_SOURCES, so the engine's own stamp above stays valid.
-    vision_src = S.source_hash(("tools/vision",))
-    if not M.compile_vision({"archs": archs, "nvcc": nvcc}, result, llama, vision_src):
-        sys.exit("vision encoder compilation failed")
+    # Pascal (sm_6x, the Tesla P40) images are built text only: images need the encoder's VRAM
+    # beside the expert pool, which a P40 rig has little of.  The entrypoint passes --no-vision
+    # on such an image, so a first start neither downloads the 1.1 GB files nor compiles one.
+    if min(archs) >= 70:
+        vision_src = S.source_hash(("tools/vision",))
+        if not M.compile_vision({"archs": archs, "nvcc": nvcc}, result, llama, vision_src):
+            sys.exit("vision encoder compilation failed")
+    else:
+        print(f"skipping the vision encoder: sm_{min(archs)} (Pascal) images are text only")
 
 
 if __name__ == "__main__":

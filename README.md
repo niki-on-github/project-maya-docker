@@ -12,10 +12,10 @@ newest tag and builds and pushes **both** architectures to GHCR as
 `sm61-v1.1.15`) and `:<arch>-latest`.  Manual runs and pushes to `main` build
 too; every run rebuilds both architectures.
 
-| Image | `<arch>` | GPU | `CUDA_ARCHITECTURES` | Default drafting |
-|---|---|---|---|---|
-| CMP 170HX / A100 | `sm80` | compute capability 8.0 | `80` | DFlash2 |
-| Tesla P40 / P100 | `sm61` | Pascal, compute capability 6.1 | `61` | MTP block |
+| Image | `<arch>` | GPU | `CUDA_ARCHITECTURES` | Default drafting | Vision |
+|---|---|---|---|---|---|
+| CMP 170HX / A100 | `sm80` | compute capability 8.0 | `80` | DFlash2 | yes |
+| Tesla P40 / P100 | `sm61` | Pascal, compute capability 6.1 | `61` | MTP block | no (text only) |
 
 Build input (`workflow_dispatch`):
 
@@ -25,8 +25,9 @@ Build input (`workflow_dispatch`):
 
 On a GitHub-hosted runner each build drops from ~37 min for all seven upstream
 architectures (cold, no cache) to roughly **10–15 min** for the single-arch
-engine, plus another ~10–20 min the first time for the vision encoder (both are
-built in the image, so a container's first start only downloads).  With the GHA
+engine, plus another ~10–20 min the first time for the vision encoder (built on
+sm_70+ only — the `sm61` image is text only; both are built in the image, so a
+container's first start only downloads).  With the GHA
 layer cache warm it is faster.  The P40 (`sm61`) image is
 built differently — see [Rebuild for a different NVIDIA card](#rebuild-for-a-different-nvidia-card).
 
@@ -89,8 +90,9 @@ Anthropic-compatible one at `/v1/messages`.
 The entrypoint runs Maya's non-interactive setup with
 `--download-model --models-dir /models`: the quant you chose (default:
 **Maya-M-Derisked**; the image sets `MAYA_MODEL`, override it with
-`-e MAYA_MODEL=...`) is downloaded **resumably** into `/models` (96.5–156 GB +
-1.1 GB vision encoder), the pack is built next to it, and the config is kept on
+`-e MAYA_MODEL=...`) is downloaded **resumably** into `/models` (96.5–156 GB,
+plus the vision encoder's 1.1 GB on the `sm80` image), the pack is built next to
+it, and the config is kept on
 `/data` — a recreated (or updated) container re-uses both.  A stopped download
 continues on the next start.  On the `sm80` image the DFlash2 drafter (0.7 GB) is
 fetched the same way (see [DFlash2](#dflash2-optional-drafting)).
@@ -99,6 +101,18 @@ Note from upstream: while Maya runs, the engine pins almost all free RAM for
 its expert tier — other programs get little.  `--ipc host`,
 `--cap-add IPC_LOCK` and `--ulimit memlock=-1` let it do so inside the
 container (mlock of the ~tens of GB expert pool is required for the RAM tier).
+
+### Text only on the `sm61` image
+
+The Pascal image is built **without** the vision encoder: images need the
+encoder's 1.1 GB files and its VRAM beside the expert pool, which a 24 GB P40
+rig has little of.  The image's first start therefore passes upstream's
+`--no-vision` (nothing is downloaded or compiled), and a `/data` volume from an
+image that had the encoder is made text only at start — the config's `vision`
+entry is dropped with a note (its files stay in `/models`, unused).  The server
+reports text only and refuses image requests.  The gate is the architecture
+(`tools/docker_build.py` builds the encoder for sm_70+), so images are on the
+`sm80` image and on custom builds for sm_70 and newer.
 
 ### Environment
 
@@ -186,14 +200,27 @@ picked up automatically.  It also refuses any `MAYA_REF` older than **v1.1.14**,
 the release that added Pascal support (PR #214) - an older ref cannot build for
 a P40 at all.
 
+### Portable binaries (no `-march=native`)
+
+The images are built on GitHub runners, whose CPUs have AVX-512; the card's own
+host often does not (a Xeon E5, a desktop Ryzen).  Upstream's CUDA build leaves
+ggml at its default `GGML_NATIVE=ON`, which bakes the build machine's instruction
+set into ggml — the engine then dies with `SIGILL` ("Illegal instruction", exit
+132) the moment it reaches ggml code, the vision encoder the same.
+`tools/docker_build.py` therefore adds upstream's own portable switch to every
+cmake configure, `-DSTRATA_PORTABLE=ON -DGGML_NATIVE=OFF`: an AVX2 baseline
+everywhere, with ggml still selecting AVX-512 at runtime on CPUs that have it.
+(The HIP path sets `STRATA_PORTABLE` itself.)
+
 ## Files
 
 - `Dockerfile` — clones upstream at `MAYA_REF` (default latest release handled
   by CI), compiles for `CUDA_ARCHITECTURES`, sets the default `MAYA_MODEL`
 - `tools/docker_build.py` — compile-only helper (no GPU needed at build time)
-  that builds the engine and the vision encoder, reusing upstream's maya.py
-  machinery; handles Pascal's explicit-arch build and enforces the minimum Maya
-  version (v1.1.14)
+  that builds the engine (with upstream's portable switch: an AVX2 baseline, so
+  the image does not carry the build runner's AVX-512) and, on sm_70+, the vision
+  encoder, reusing upstream's maya.py machinery; handles Pascal's explicit-arch
+  build and enforces the minimum Maya version (v1.1.14)
 - `docker-entrypoint.sh` — first-start setup + model download (and the DFlash2
   drafter where it applies), config kept on `/data`
 - `.github/workflows/docker-ghcr.yml` — daily tag-resolve + publish of both

@@ -56,9 +56,10 @@ RUN python3 -m venv .venv \
          numpy jinja2 regex pyyaml tqdm requests cmake ninja pillow psutil \
     && chmod +x maya.sh setup.sh
 
-# Compile the engine AND the vision encoder for the configured arch(es); write
-# build/MAYA-BUILD.json and build-vision/MAYA-BUILD.json (the same source-hash
-# checks maya.py runs at start, so the container start skips compiling both)
+# Compile the engine (and, on sm_70+, the vision encoder) for the configured
+# arch(es); write build/MAYA-BUILD.json and build-vision/MAYA-BUILD.json (the same
+# source-hash checks maya.py runs at start, so the container start skips compiling
+# both) - a Pascal (sm61) image is text only and has no build-vision/
 COPY tools/docker_build.py tools/docker_build.py
 RUN .venv/bin/python tools/docker_build.py
 
