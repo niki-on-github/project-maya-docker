@@ -23,11 +23,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # to pick the drafting default - DFlash2 on sm_80+, the MTP block otherwise.)
 
 # git is only needed here (the upstream source is cloned in the image build); a
-# CUDA *devel* image is required for nvcc at build time.
+# CUDA *devel* image is required for nvcc at build time.  ffmpeg (which ships
+# ffprobe) decodes video input for the vision encoder (v1.1.27+).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
       ca-certificates \
       curl \
+      ffmpeg \
       git \
       libgomp1 \
       python3 \

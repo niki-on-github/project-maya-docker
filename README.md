@@ -114,6 +114,10 @@ reports text only and refuses image requests.  The gate is the architecture
 (`tools/docker_build.py` builds the encoder for sm_70+), so images are on the
 `sm80` image and on custom builds for sm_70 and newer.
 
+Video input (`video_url` / Anthropic `video`, v1.1.27) goes through the same
+encoder, and upstream decodes the frames with `ffmpeg`/`ffprobe` — both are in
+the image, so videos work wherever images do.
+
 ### Environment
 
 | Variable | Default | Meaning |
