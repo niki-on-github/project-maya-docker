@@ -11,6 +11,8 @@ maya.arch_setting() answers "native" (auto-detect the build machine's GPU)
 there - neither works on this GPU-less build.  So the explicit arch is forced
 and upstream's floor is relaxed to Maya's own minimum (Pascal, 6.0), which also
 lets its `-Xptxas -dlcm=ca` path (L1-cached global loads Pascal needs) run.
+Pre-Volta cards also allow only 4 KB of kernel arguments, which the mixed EXL3
+kernel's exceed, so its argument list is trimmed for those builds.
 
 Maya also has to be new enough: the sm_6x kernel guards and the `-dlcm=ca` flag
 landed in v1.1.14 (PR #214), so an older ref cannot be compiled for a P40 at
@@ -61,6 +63,58 @@ def allow_pascal_archs() -> None:
     path.write_text(patched, encoding="utf-8")
 
 
+def trim_exl3_mix_args() -> None:
+    """Pre-Volta allows 4 KB of kernel arguments (32 KB from sm_70 on): set_mix_kernel takes SetArgs (4016 bytes),
+    KMix (1768) and its pointers - 5828 - so nvcc refuses it for sm_61 ("Formal parameter space overflowed").  The
+    kernel reads six of SetArgs' fields, so pass just those: the same code, ~1.9 KB of arguments.  (The mixed EXL3
+    kernels run on the cards EXL3 supports - V100 and newer - but every arch is compiled.)  The patch lives in the
+    image, so the source hash maya.py recomputes at container start matches this build's."""
+    path = ROOT / "src/kernels/cuda/exl3.cu"
+    if not path.exists():
+        return          # (EXL3's kernels landed after v1.1.14: nothing over the limit yet)
+    text = path.read_text(encoding="utf-8")
+    if "set_mix_kernel(SetArgs a, KMix mx" not in text:
+        return          # (no mixed-layout kernel, or upstream already trimmed it)
+    edits = [
+        ("""// hip_set_kernel for a mixed-precision layer: expert e's blob at a.eptr[e], each part at its class's K
+template <int cb, bool gate_up>
+__global__ void __launch_bounds__(kThreads) set_mix_kernel(SetArgs a, KMix mx, const float* x, int ldx,
+""",
+         """// hip_set_kernel for a mixed-precision layer: expert e's blob at a.eptr[e], each part at its class's K
+// (pre-Volta's 4 KB of kernel arguments: SetArgs' 4016 bytes + KMix's 1768 do not fit, and the kernel reads only
+// these fields of SetArgs - the body's a.bounds / a.row0 / ... still find them)
+struct SetMixArgs {
+    const unsigned long long* eptr;
+    const int* bounds;
+    int row0, n_embd, n_ff;
+    float limit;
+};
+static SetMixArgs mix_args(const SetArgs& a) {
+    return {a.eptr, a.bounds, a.row0, a.n_embd, a.n_ff, a.limit};
+}
+template <int cb, bool gate_up>
+__global__ void __launch_bounds__(kThreads) set_mix_kernel(SetMixArgs a, KMix mx, const float* x, int ldx,
+"""),
+        ("""                    sa, k, x, ldx, row_idx, h16, ldh, nullptr, 0);
+        });
+        launch_check("set_gate_up (mixed)");""",
+         """                    mix_args(sa), k, x, ldx, row_idx, h16, ldh, nullptr, 0);
+        });
+        launch_check("set_gate_up (mixed)");"""),
+        ("""                    sa, k, nullptr, 0, nullptr, const_cast<uint16_t*>(h16), ldh, y, ldy);
+        });
+        launch_check("set_down (mixed)");""",
+         """                    mix_args(sa), k, nullptr, 0, nullptr, const_cast<uint16_t*>(h16), ldh, y, ldy);
+        });
+        launch_check("set_down (mixed)");"""),
+    ]
+    for old, new in edits:
+        if old not in text:
+            sys.exit(f"{path.relative_to(ROOT)}: expected set_mix_kernel text not found (upstream changed)")
+        text = text.replace(old, new, 1)
+    path.write_text(text, encoding="utf-8")
+
+
 def main():
     raw = os.environ.get("CUDA_ARCHITECTURES", "80")
     archs = sorted({int(x) for x in raw.replace(",", ";").split(";") if x.strip()})
@@ -78,6 +132,8 @@ def main():
     # the stamped hash still matches the tree the running container sees.
     if min(archs) < 75:
         allow_pascal_archs()
+    if min(archs) < 70:
+        trim_exl3_mix_args()
     M.arch_setting = lambda a: ";".join(str(x) for x in a)
 
     llama = S.get_llama_cpp()            # pinned commit, into third_party/

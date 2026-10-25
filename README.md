@@ -202,7 +202,10 @@ floor to Maya's own minimum (6.0), so `sm_61` is accepted and upstream's Pascal
 path - `-Xptxas -dlcm=ca`, L1-cached global loads the decode needs there - is
 picked up automatically.  It also refuses any `MAYA_REF` older than **v1.1.14**,
 the release that added Pascal support (PR #214) - an older ref cannot build for
-a P40 at all.
+a P40 at all.  Pre-Volta cards also allow only 4 KB of kernel arguments (32 KB
+from sm_70 on), which the mixed EXL3 kernel's `SetArgs` + `KMix` exceed, so for
+`sm_6x` builds `tools/docker_build.py` trims that kernel to the fields it reads
+(EXL3 itself needs V100 or newer).
 
 ### Portable binaries (no `-march=native`)
 
@@ -224,7 +227,7 @@ everywhere, with ggml still selecting AVX-512 at runtime on CPUs that have it.
   that builds the engine (with upstream's portable switch: an AVX2 baseline, so
   the image does not carry the build runner's AVX-512) and, on sm_70+, the vision
   encoder, reusing upstream's maya.py machinery; handles Pascal's explicit-arch
-  build and enforces the minimum Maya version (v1.1.14)
+  and kernel-argument-limit builds and enforces the minimum Maya version (v1.1.14)
 - `docker-entrypoint.sh` — first-start setup + model download (and the DFlash2
   drafter where it applies), config kept on `/data`
 - `.github/workflows/docker-ghcr.yml` — daily tag-resolve + publish of both
