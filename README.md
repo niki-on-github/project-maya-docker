@@ -8,8 +8,8 @@ lives outside the image and downloads on first start.
 
 A daily cron (this repo, "Build and publish Docker image") resolves upstream's
 newest tag and builds and pushes **both** architectures to GHCR as
-`ghcr.io/<owner>/<repo>:<arch>-<upstream-tag>` (e.g. `sm80-v1.1.15`,
-`sm61-v1.1.15`) and `:<arch>-latest`.  Manual runs and pushes to `main` build
+`ghcr.io/<owner>/<repo>:<arch>-<upstream-tag>` (e.g. `sm80-v1.1.27`,
+`sm61-v1.1.27`) and `:<arch>-latest`.  Manual runs and pushes to `main` build
 too; every run rebuilds both architectures.
 
 | Image | `<arch>` | GPU | `CUDA_ARCHITECTURES` | Default drafting | Vision |

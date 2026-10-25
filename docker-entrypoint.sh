@@ -42,7 +42,9 @@
 
 ROOT=/opt/project-maya
 CONFDIR=/data/maya/configs
-VISION_EXE="$ROOT/build-vision/bin/strata-vision"   # the image encoder: in the sm80 image, not the sm61 (Pascal) one
+VISION_EXE="$ROOT/build-vision/bin/maya-vision"   # the image encoder: in the sm80 image, not the sm61 (Pascal) one
+# v1.1.16 renamed it (strata-vision -> maya-vision); an older MAYA_REF build still has the old name.
+[ -x "$VISION_EXE" ] || VISION_EXE="$ROOT/build-vision/bin/strata-vision"
 cd "$ROOT" || exit 1
 
 mkdir -p "$CONFDIR" /models
@@ -119,6 +121,10 @@ for p in sorted(glob.glob(os.path.join(os.environ["CONFDIR"], "maya-*.json"))):
         continue
     v = cfg.get("vision")
     if not v or os.path.exists(v.get("exe") or ""):
+        continue
+    # v1.1.16 renamed the encoder (strata-vision -> maya-vision) and upstream rewrites a
+    # config's path at start: the old name counts as present too.
+    if os.path.exists((v.get("exe") or "").replace("strata-vision", "maya-vision")):
         continue
     cfg.pop("vision")
     tmp = f"{p}.tmp"

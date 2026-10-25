@@ -3,7 +3,7 @@ name: Build and publish Docker image
 # Keeps the images in step with upstream's newest tag: a daily cron resolves
 # mw00/project-maya's newest tag and pushes ghcr.io/<owner>/<repo> for BOTH
 # architectures - CMP 170HX (sm80) and Pascal / Tesla P40 (sm61) - each tagged
-# <arch>-<upstream-tag> (e.g. sm80-v1.1.15, sm61-v1.1.15) and <arch>-latest.
+# <arch>-<upstream-tag> (e.g. sm80-v1.1.27, sm61-v1.1.27) and <arch>-latest.
 # Both are built on every run.
 on:
   schedule:

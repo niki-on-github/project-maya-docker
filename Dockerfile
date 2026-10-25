@@ -8,12 +8,12 @@
 # (see docker-entrypoint.sh).
 #
 # Build with a specific upstream tag:
-#   docker build --build-arg MAYA_REF=v1.1.15 -t maya .         # CMP 170HX, sm_80
+#   docker build --build-arg MAYA_REF=v1.1.27 -t maya .         # CMP 170HX, sm_80
 #   docker build --build-arg CUDA_ARCHITECTURES=61 -t maya-p40 . # Tesla P40, sm_61
 ARG CUDA_BASE=12.8.1-devel-ubuntu24.04
 FROM nvidia/cuda:${CUDA_BASE}
 
-ARG MAYA_REF=v1.1.15
+ARG MAYA_REF=v1.1.27
 ARG CUDA_ARCHITECTURES=80
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -54,6 +54,7 @@ RUN python3 -m venv .venv \
     # exact upstream list (setup.py PY_PACKAGES)
     && .venv/bin/pip install --no-cache-dir \
          numpy jinja2 regex pyyaml tqdm requests cmake ninja pillow psutil \
+         'jsonschema>=4.18,<5' \
     && chmod +x maya.sh setup.sh
 
 # Compile the engine (and, on sm_70+, the vision encoder) for the configured

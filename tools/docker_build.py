@@ -16,6 +16,7 @@ Maya also has to be new enough: the sm_6x kernel guards and the `-dlcm=ca` flag
 landed in v1.1.14 (PR #214), so an older ref cannot be compiled for a P40 at
 all.  This build refuses anything below that rather than failing deep in nvcc.
 """
+import inspect
 import os
 import re
 import shutil
@@ -93,9 +94,15 @@ def main():
     # baseline, with ggml still picking AVX-512 at runtime on CPUs that have it.  compile_engine and
     # compile_vision both configure through maya.cmake_steps, so one wrapper covers both.
     _cmake_steps = M.cmake_steps
+    # v1.1.17 gave cmake_steps an `nvcc` (the toolkit's release decides on Windows whether a VS 2026-only
+    # PC can build); an older ref - still accepted, MIN_VERSION is v1.1.14 - does not take it.
+    takes_nvcc = "nvcc" in inspect.signature(_cmake_steps).parameters
 
-    def portable_cmake_steps(conf, build, env, bat_name, vcvars=None):
-        return _cmake_steps([*conf, "-DSTRATA_PORTABLE=ON", "-DGGML_NATIVE=OFF"], build, env, bat_name, vcvars)
+    def portable_cmake_steps(conf, build, env, bat_name, vcvars=None, nvcc=None):
+        conf = [*conf, "-DSTRATA_PORTABLE=ON", "-DGGML_NATIVE=OFF"]
+        if takes_nvcc:
+            return _cmake_steps(conf, build, env, bat_name, vcvars, nvcc)
+        return _cmake_steps(conf, build, env, bat_name, vcvars)
 
     M.cmake_steps = portable_cmake_steps
 
